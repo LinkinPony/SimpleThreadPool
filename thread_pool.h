@@ -12,6 +12,7 @@
 #include <queue>
 #include <vector>
 #include <functional>
+#include <iostream>
 
 namespace ThreadPool {
 template<typename T>
@@ -113,9 +114,11 @@ auto ThreadPool::submit(F &&f, Args &&... args) -> std::future<decltype(f(args..
         (*task_ptr)();
       }
   );
+  auto res = task_ptr->get_future();
+//  std::cout << threads_.size() << std::endl;
   task_queue_.push(closure);
   queue_cond_.notify_one();
-  return task_ptr->get_future();
+  return res;
 }
 };
 #endif //SIMPLETHREADPOOL_THREAD_POOL_H

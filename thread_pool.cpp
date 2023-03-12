@@ -16,10 +16,9 @@ void ThreadPool::ThreadWorker::work() {
   if(!pool_->isRun()){
     return;
   }
-  //TODO: delete this
-  assert(pool_->task_queue_.size() > 0);
   auto work = pool_->task_queue_.front();
   pool_->task_queue_.pop();
+  lock.unlock();
   work();
 }
 void ThreadPool::ThreadWorker::run() {
@@ -28,7 +27,6 @@ void ThreadPool::ThreadWorker::run() {
   }
 }
 ThreadPool::ThreadWorker::ThreadWorker(ThreadPool *pool, int id) : pool_(pool), id_(id) {
-
 }
 void ThreadPool::ThreadWorker::operator()() {
   run();
