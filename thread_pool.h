@@ -15,47 +15,45 @@
 #include <iostream>
 
 namespace ThreadPool {
-template<typename T>
-class ThreadSafeQueue {
+
+class QueueInterface {
  public:
-  size_t size();
-  T &front();
-  void pop();
-  void push(T &in);
-  void clear();
+  virtual bool empty() = 0;
+  virtual bool dequeue(std::function<void()> &ret_var) = 0;
+  virtual void enqueue(const std::function<void()> &in_var) = 0;
+  virtual ~QueueInterface() = default;
+};
+template<typename T>
+class ThreadSafeQueue : public QueueInterface {
+ public:
+  bool empty() override;
+  bool dequeue(T &ret_var) override;
+  void enqueue(const T &in_var) override;
  private:
   std::queue<T> queue_;
   std::mutex mutex_;
 };
-template<typename T>
-void ThreadSafeQueue<T>::clear() {
-  std::unique_lock<std::mutex> lock{mutex_};
-  while (!queue_.empty()) {
-    queue_.pop();
-  }
-}
-template<typename T>
-void ThreadSafeQueue<T>::pop() {
-  std::unique_lock<std::mutex> lock{mutex_};
-  queue_.pop();
-}
-template<typename T>
-T &ThreadSafeQueue<T>::front() {
-  std::unique_lock<std::mutex> lock{mutex_};
-  return queue_.front();
-}
-template<typename T>
-void ThreadSafeQueue<T>::push(T &in) {
-  std::unique_lock<std::mutex> lock{mutex_};
-  queue_.emplace(in);
-}
-template<typename T>
-size_t ThreadSafeQueue<T>::size() {
-  std::unique_lock<std::mutex> lock{mutex_};
-  return queue_.size();
-}
-//extract tasks in queue and handle them. each worker is a endless thread.
 
+template<typename T>
+void ThreadSafeQueue<T>::enqueue(const T &in_var) {
+  std::unique_lock<std::mutex> lock(mutex_);
+  queue_.push(in_var);
+}
+template<typename T>
+bool ThreadSafeQueue<T>::dequeue(T &ret_var) {
+  std::unique_lock<std::mutex> lock(mutex_);
+  if (!queue_.empty()) {
+    ret_var = queue_.front();
+    queue_.pop();
+    return true;
+  }
+  return false;
+}
+template<typename T>
+bool ThreadSafeQueue<T>::empty() {
+  std::unique_lock<std::mutex> lock(mutex_);
+  return queue_.empty();
+}
 
 class ThreadPool {
  public:
@@ -63,12 +61,13 @@ class ThreadPool {
   template<typename F, typename... Args>
   auto submit(F &&f, Args &&... args) -> std::future<decltype(f(args...))>;
  public:
-  explicit ThreadPool(size_t thread_num = std::thread::hardware_concurrency());
+  explicit ThreadPool(std::unique_ptr<QueueInterface> task_queue,
+                      size_t thread_num = std::thread::hardware_concurrency());
   ~ThreadPool();
   ThreadPool(const ThreadPool &) = delete;
   ThreadPool(ThreadPool &&) = delete;
-  ThreadPool& operator = (const ThreadPool &) = delete;
-  ThreadPool& operator = (ThreadPool&&) = delete;
+  ThreadPool &operator=(const ThreadPool &) = delete;
+  ThreadPool &operator=(ThreadPool &&) = delete;
  public:
   [[nodiscard]] bool isRun() const { return run_; }
   //Terminate and discard all queued works
@@ -76,16 +75,15 @@ class ThreadPool {
  public:
   std::mutex worker_mutex_;
   std::condition_variable queue_cond_;
-  ThreadSafeQueue<std::function<void()>> task_queue_;
+  std::unique_ptr<QueueInterface> task_queue_;
  private:
   void init();
  private:
   bool run_;
   int thread_num_;
   std::vector<std::thread> threads_;
-
-
 };
+//extract tasks in queue and handle them. each worker is a endless thread.
 class ThreadWorker {
  public:
   ThreadWorker(ThreadPool *pool, int id);
@@ -116,7 +114,7 @@ auto ThreadPool::submit(F &&f, Args &&... args) -> std::future<decltype(f(args..
   );
   auto res = task_ptr->get_future();
 //  std::cout << threads_.size() << std::endl;
-  task_queue_.push(closure);
+  task_queue_->enqueue(closure);
   queue_cond_.notify_one();
   return res;
 }

@@ -6,20 +6,19 @@
 #include <cassert>
 #include "thread_pool.h"
 void ThreadPool::ThreadWorker::work() {
+  std::function<void()> work;
+  bool ok;
   std::unique_lock<std::mutex> lock(pool_->worker_mutex_);
   pool_->queue_cond_.wait(lock,
-                          [this]() ->
+                          [this,&ok,&work]() ->
                               bool {
-                            return pool_->task_queue_.size() > 0 || !pool_->isRun();
+                            return (ok = pool_->task_queue_->dequeue(work)) || !pool_->isRun();
                           }
   );
-  if(!pool_->isRun()){
-    return;
-  }
-  auto work = pool_->task_queue_.front();
-  pool_->task_queue_.pop();
   lock.unlock();
-  work();
+  if (ok) {
+    work();
+  }
 }
 void ThreadPool::ThreadWorker::run() {
   while (pool_->isRun()) {
@@ -31,7 +30,8 @@ ThreadPool::ThreadWorker::ThreadWorker(ThreadPool *pool, int id) : pool_(pool), 
 void ThreadPool::ThreadWorker::operator()() {
   run();
 }
-ThreadPool::ThreadPool::ThreadPool(size_t thread_num) : thread_num_(thread_num) {
+ThreadPool::ThreadPool::ThreadPool(std::unique_ptr<QueueInterface> task_queue,
+                                   size_t thread_num) : task_queue_(std::move(task_queue)), thread_num_(thread_num) {
   run_ = true;
   init();
 }
@@ -46,8 +46,8 @@ ThreadPool::ThreadPool::~ThreadPool() {
 void ThreadPool::ThreadPool::stop() {
   run_ = false;
   queue_cond_.notify_all();
-  for(auto & it:threads_){
-    if(it.joinable()){
+  for (auto &it : threads_) {
+    if (it.joinable()) {
       it.join();
     }
   }
